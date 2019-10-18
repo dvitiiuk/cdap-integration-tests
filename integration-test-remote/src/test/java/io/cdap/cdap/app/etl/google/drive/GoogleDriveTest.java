@@ -16,6 +16,29 @@
 
 package io.cdap.cdap.app.etl.google.drive;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.security.GeneralSecurityException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+import org.apache.commons.lang3.RandomStringUtils;
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.BeforeClass;
+import org.junit.Test;
+
 import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.http.ByteArrayContent;
@@ -29,6 +52,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+
 import io.cdap.cdap.api.artifact.ArtifactScope;
 import io.cdap.cdap.common.ArtifactNotFoundException;
 import io.cdap.cdap.common.conf.Constants;
@@ -45,28 +69,6 @@ import io.cdap.cdap.proto.artifact.PluginSummary;
 import io.cdap.cdap.proto.id.ApplicationId;
 import io.cdap.cdap.proto.id.ArtifactId;
 import io.cdap.cdap.test.ApplicationManager;
-import org.apache.commons.lang3.RandomStringUtils;
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
-
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.security.GeneralSecurityException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 /**
  * Tests reading to and writing from Google Drive within a Dataproc cluster.
@@ -285,9 +287,11 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
 
     destFiles.forEach(file -> {
       Assert.assertNotNull(file.getName());
+      String fileName = null;
+      String mimeType = null;
       try {
-        String fileName = file.getName();
-        String mimeType = file.getMimeType();
+        fileName = file.getName();
+        mimeType = file.getMimeType();
         String content = getFileContent(file.getId());
         switch (fileName) {
           case TEST_TEXT_FILE_NAME:
@@ -309,7 +313,10 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
                                fileName, content, mimeType));
         }
       } catch (IOException e) {
-        fail(String.format("Exception during test results check: [%s]", e.getMessage()));
+        fail(String.format("Exception during test results check: [%s], file name '%s', mimeType '%s'",
+                           e.getMessage(),
+                           fileName == null ? "unknown" : fileName,
+                           mimeType == null ? "unknown" : mimeType));
       }
     });
   }

@@ -16,12 +16,11 @@
 
 package io.cdap.cdap.app.etl.google.drive;
 
-import io.cdap.cdap.api.common.Bytes;
-import io.cdap.cdap.app.etl.gcp.DataprocETLTestBase;
+import java.io.IOException;
+
 import org.junit.BeforeClass;
 
-import java.io.IOException;
-import java.util.Base64;
+import io.cdap.cdap.app.etl.gcp.DataprocETLTestBase;
 
 /**
  * An abstract class used for running integration tests with Google OAuth2 user credentials.
@@ -34,16 +33,12 @@ public abstract class DataprocUserCredentialsTestBase extends DataprocETLTestBas
   @BeforeClass
   public static void testDataprocClassSetup() throws IOException {
     DataprocETLTestBase.testDataprocClassSetup();
-    String clientIdProperty = System.getProperty("google.application.clientId.base64.encoded");
-    String clientSecretProperty = System.getProperty("google.application.clientSecret.base64.encoded");
-    String refreshTokenProperty = System.getProperty("google.application.refreshToken.base64.encoded");
-    if (clientIdProperty == null || clientSecretProperty== null || refreshTokenProperty == null) {
+    clientId = System.getProperty("google.application.clientId");
+    clientSecret = System.getProperty("google.application.clientSecret");
+    refreshToken = System.getProperty("google.application.refreshToken");
+    if (clientId == null || clientSecret== null || refreshToken == null) {
       throw new IllegalArgumentException("Invalid user credential parameters");
     }
-
-    clientId = Bytes.toString(Base64.getDecoder().decode(clientIdProperty));
-    clientSecret = Bytes.toString(Base64.getDecoder().decode(clientSecretProperty));
-    refreshToken = Bytes.toString(Base64.getDecoder().decode(refreshTokenProperty));
   }
 
   public static String getClientId() {
