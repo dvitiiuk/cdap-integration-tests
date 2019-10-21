@@ -16,6 +16,7 @@
 
 package io.cdap.cdap.app.etl.google.drive;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
@@ -24,13 +25,21 @@ import static org.junit.Assert.fail;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.After;
@@ -52,11 +61,17 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import io.cdap.cdap.api.artifact.ArtifactScope;
+import io.cdap.cdap.api.data.schema.Schema;
 import io.cdap.cdap.common.ArtifactNotFoundException;
 import io.cdap.cdap.common.conf.Constants;
 import io.cdap.cdap.common.utils.Tasks;
+import io.cdap.cdap.datapipeline.SmartWorkflow;
 import io.cdap.cdap.etl.api.batch.BatchSink;
 import io.cdap.cdap.etl.api.batch.BatchSource;
 import io.cdap.cdap.etl.proto.ArtifactSelectorConfig;
@@ -69,15 +84,19 @@ import io.cdap.cdap.proto.artifact.PluginSummary;
 import io.cdap.cdap.proto.id.ApplicationId;
 import io.cdap.cdap.proto.id.ArtifactId;
 import io.cdap.cdap.test.ApplicationManager;
+import io.cdap.cdap.test.WorkflowManager;
 
 /**
- * Tests reading to and writing from Google Drive within a Dataproc cluster.
+ * Tests reading to and writing from Google Drive within a sandbox cluster.
  */
-public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
+public class GoogleDriveTest extends UserCredentialsTestBase {
   protected static final ArtifactSelectorConfig GOOGLE_DRIVE_ARTIFACT =
     new ArtifactSelectorConfig("SYSTEM", "google-drive-plugins", "[0.0.0, 100.0.0)");
+  protected static final ArtifactSelectorConfig FILE_ARTIFACT =
+    new ArtifactSelectorConfig("SYSTEM", "core-plugins", "[0.0.0, 100.0.0)");
   private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
   private static final String GOOGLE_DRIVE_PLUGIN_NAME = "GoogleDrive";
+  private static final String FILE_PLUGIN_NAME = "File";
   private static final int GENERATED_NAME_LENGTH = 16;
   private static final String TEXT_PLAIN_MIME = "text/plain";
   private static final String TEXT_CSV_MIME = "text/csv";
@@ -89,6 +108,7 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
   private static final String TEST_TEXT_FILE_CONTENT = "text file content";
   private static final String TEST_DOC_FILE_CONTENT = "Google Document file content";
   private static final String TEST_SHEET_FILE_CONTENT = "a,b,c\r\n,d,e";
+  public static final String TMP_FOLDER = "/tmp/googleDriveTestFolder";
 
   private static Drive service;
   private String sourceFolderId;
@@ -114,6 +134,10 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
 
   @Before
   public void testClassSetup() throws IOException {
+    ImmutableList.of(ImmutableList.of(GOOGLE_DRIVE_PLUGIN_NAME, BatchSource.PLUGIN_TYPE, "cdap-data-pipeline"),
+                     ImmutableList.of(GOOGLE_DRIVE_PLUGIN_NAME, BatchSink.PLUGIN_TYPE, "cdap-data-pipeline"))
+      .forEach((pluginInfo) -> checkPluginExists(pluginInfo.get(0), pluginInfo.get(1), pluginInfo.get(2)));
+
     String sourceFolderName = RandomStringUtils.randomAlphanumeric(16);
     String sinkFolderName = RandomStringUtils.randomAlphanumeric(16);
 
@@ -126,6 +150,7 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
                                "application/vnd.google-apps.document", TEXT_PLAIN_MIME, sourceFolderId);
     testSheetFileId = createFile(service, TEST_SHEET_FILE_CONTENT.getBytes(), TEST_SHEET_FILE_NAME,
                                  "application/vnd.google-apps.spreadsheet", TEXT_CSV_MIME, sourceFolderId);
+    createFileSystemFolder(TMP_FOLDER);
   }
 
   @After
@@ -135,16 +160,21 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
     removeFile(service, testSheetFileId);
     removeFile(service, sourceFolderId);
     removeFile(service, sinkFolderId);
+
+    Files.walk(Paths.get(TMP_FOLDER))
+      .sorted(Comparator.reverseOrder())
+      .map(Path::toFile)
+      .forEach(java.io.File::delete);
   }
 
   @Test
   public void testBinaryOnly() throws Exception {
-    Map<String, String> sourceProps = getSourceMinimalDefaultConfigs();
+    Map<String, String> sourceProps = getDriveSourceMinimalDefaultConfigs();
     sourceProps.put("fileTypesToPull", "binary");
-    Map<String, String> sinkProps = getSinkMinimalDefaultConfigs();
+    Map<String, String> sinkProps = getDriveSinkMinimalDefaultConfigs();
 
     DeploymentDetails deploymentDetails =
-      deployApplication(sourceProps, sinkProps,
+      deployGoogleDriveApplication(sourceProps, sinkProps,
                         GOOGLE_DRIVE_PLUGIN_NAME + "-testBinaryOnly");
     startWorkFlow(deploymentDetails.getAppManager(), ProgramRunStatus.COMPLETED);
 
@@ -166,12 +196,12 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
 
   @Test
   public void testDocFileOnly() throws Exception {
-    Map<String, String> sourceProps = getSourceMinimalDefaultConfigs();
+    Map<String, String> sourceProps = getDriveSourceMinimalDefaultConfigs();
     sourceProps.put("fileTypesToPull", "documents");
-    Map<String, String> sinkProps = getSinkMinimalDefaultConfigs();
+    Map<String, String> sinkProps = getDriveSinkMinimalDefaultConfigs();
 
     DeploymentDetails deploymentDetails =
-      deployApplication(sourceProps, sinkProps,
+      deployGoogleDriveApplication(sourceProps, sinkProps,
                         GOOGLE_DRIVE_PLUGIN_NAME + "-testDocFileOnly");
     startWorkFlow(deploymentDetails.getAppManager(), ProgramRunStatus.COMPLETED);
 
@@ -195,12 +225,12 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
 
   @Test
   public void testAllFileTypes() throws Exception {
-    Map<String, String> sourceProps = getSourceMinimalDefaultConfigs();
+    Map<String, String> sourceProps = getDriveSourceMinimalDefaultConfigs();
     sourceProps.put("fileTypesToPull", "binary,documents,spreadsheets");
-    Map<String, String> sinkProps = getSinkMinimalDefaultConfigs();
+    Map<String, String> sinkProps = getDriveSinkMinimalDefaultConfigs();
 
     DeploymentDetails deploymentDetails =
-      deployApplication(sourceProps, sinkProps,
+      deployGoogleDriveApplication(sourceProps, sinkProps,
                         GOOGLE_DRIVE_PLUGIN_NAME + "-testAllFileTypes");
     startWorkFlow(deploymentDetails.getAppManager(), ProgramRunStatus.COMPLETED);
 
@@ -221,14 +251,14 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
 
   @Test
   public void testAllFileTypesNamed() throws Exception {
-    Map<String, String> sourceProps = getSourceMinimalDefaultConfigs();
+    Map<String, String> sourceProps = getDriveSourceMinimalDefaultConfigs();
     sourceProps.put("fileTypesToPull", "binary,documents,spreadsheets");
     sourceProps.put("fileMetadataProperties", "name");
-    Map<String, String> sinkProps = getSinkMinimalDefaultConfigs();
+    Map<String, String> sinkProps = getDriveSinkMinimalDefaultConfigs();
     sinkProps.put("schemaNameFieldName", "name");
 
     DeploymentDetails deploymentDetails =
-      deployApplication(sourceProps, sinkProps,
+      deployGoogleDriveApplication(sourceProps, sinkProps,
                         GOOGLE_DRIVE_PLUGIN_NAME + "-testAllFileTypesNamed");
     startWorkFlow(deploymentDetails.getAppManager(), ProgramRunStatus.COMPLETED);
 
@@ -267,15 +297,15 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
 
   @Test
   public void testAllFileTypesNamedAndMimed() throws Exception {
-    Map<String, String> sourceProps = getSourceMinimalDefaultConfigs();
+    Map<String, String> sourceProps = getDriveSourceMinimalDefaultConfigs();
     sourceProps.put("fileTypesToPull", "binary,documents,spreadsheets");
     sourceProps.put("fileMetadataProperties", "name,mimeType");
-    Map<String, String> sinkProps = getSinkMinimalDefaultConfigs();
+    Map<String, String> sinkProps = getDriveSinkMinimalDefaultConfigs();
     sinkProps.put("schemaNameFieldName", "name");
     sinkProps.put("schemaMimeFieldName", "mimeType");
 
     DeploymentDetails deploymentDetails =
-      deployApplication(sourceProps, sinkProps,
+      deployGoogleDriveApplication(sourceProps, sinkProps,
                         GOOGLE_DRIVE_PLUGIN_NAME + "-testAllFileTypesNamedAndMimed");
     startWorkFlow(deploymentDetails.getAppManager(), ProgramRunStatus.COMPLETED);
 
@@ -325,16 +355,16 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
   public void testPartitionSize() throws Exception {
     int testMaxPartitionSize = 10;
 
-    Map<String, String> sourceProps = getSourceMinimalDefaultConfigs();
+    Map<String, String> sourceProps = getDriveSourceMinimalDefaultConfigs();
     sourceProps.put("fileTypesToPull", "binary,documents,spreadsheets");
     sourceProps.put("fileMetadataProperties", "name,mimeType");
     sourceProps.put("maxPartitionSize", Integer.toString(testMaxPartitionSize));
-    Map<String, String> sinkProps = getSinkMinimalDefaultConfigs();
+    Map<String, String> sinkProps = getDriveSinkMinimalDefaultConfigs();
     sinkProps.put("schemaNameFieldName", "name");
     sinkProps.put("schemaMimeFieldName", "mimeType");
 
     DeploymentDetails deploymentDetails =
-      deployApplication(sourceProps, sinkProps,
+      deployGoogleDriveApplication(sourceProps, sinkProps,
                         GOOGLE_DRIVE_PLUGIN_NAME + "-testAllFileTypesNamedAndMimed");
     startWorkFlow(deploymentDetails.getAppManager(), ProgramRunStatus.COMPLETED);
 
@@ -390,7 +420,162 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
     assertTrue(String.format("Text file was separated incorrectly: %s", parts.toString()), secondTextPart);
   }
 
-  private Map<String, String> getSourceMinimalDefaultConfigs() {
+  @Test
+  public void testWithFileSource() throws Exception {
+    // create test file
+    createFileSystemTextFile(TMP_FOLDER + "/" + TEST_TEXT_FILE_NAME, TEST_TEXT_FILE_CONTENT);
+
+    Map<String, String> sourceProps = getFileSourceMinimalDefaultConfigs();
+    Map<String, String> sinkProps = getDriveSinkMinimalDefaultConfigs();
+
+    DeploymentDetails deploymentDetails =
+      deployApplication(sourceProps, sinkProps, "FileSource", "GoogleDriveSink",
+                        FILE_PLUGIN_NAME, GOOGLE_DRIVE_PLUGIN_NAME, FILE_ARTIFACT, GOOGLE_DRIVE_ARTIFACT,
+                        GOOGLE_DRIVE_PLUGIN_NAME + "-testWithFileSource");
+    startWorkFlow(deploymentDetails.getAppManager(), ProgramRunStatus.COMPLETED);
+
+    // check number of rows in and out
+    checkRowsNumber(deploymentDetails, 1);
+
+    List<File> destFiles = getFiles(sinkFolderId);
+    assertEquals(1, destFiles.size());
+
+    File textFile = destFiles.get(0);
+
+    assertEquals(UNDEFINED_MIME, textFile.getMimeType());
+    assertNotEquals(TEST_TEXT_FILE_NAME, textFile.getName());
+    assertEquals(GENERATED_NAME_LENGTH, textFile.getName().length());
+
+    String content = getFileContent(textFile.getId());
+    assertEquals(TEST_TEXT_FILE_CONTENT, content);
+  }
+
+  @Test
+  public void testWithFileSink() throws Exception {
+    int testMaxPartitionSize = 50;
+    String testFileName = "Image.png";
+    String testFileMime = "image/png";
+    byte[] testPNGContent = new byte[]{-119,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,5,0,0,0,5,8,2,0,0,0,2,13,
+      -79,-78,0,0,0,9,112,72,89,115,0,0,11,19,0,0,11,19,1,0,-102,-100,24,0,0,0,7,116,73,77,69,7,-29,10,18,13,43,
+      15,2,-77,55,-110,0,0,0,25,116,69,88,116,67,111,109,109,101,110,116,0,67,114,101,97,116,101,100,32,
+      119,105,116,104,32,71,73,77,80,87,-127,14,23,0,0,0,40,73,68,65,84,8,-41,93,-117,65,10,0,48,12,-62,
+      -30,-1,31,-99,29,108,-95,-52,-125,72,-44,-88,73,84,0,8,-85,65,106,83,-3,44,-5,-6,-6,7,-62,-105,32,
+      -23,115,33,-2,-49,0,0,0,0,73,69,78,68,-82,66,96,-126};
+    int contentLength = testPNGContent.length;
+
+    // create png file with metadata in Google Drive
+    // size: 174 bytes
+    createFile(service, testPNGContent, testFileName, "image/png", null, sourceFolderId);
+
+    Map<String, String> sourceProps = getDriveSourceMinimalDefaultConfigs();
+    sourceProps.put("fileTypesToPull", "binary,documents,spreadsheets");
+    sourceProps.put("bodyFormat", "bytes");
+    sourceProps.put("filter", String.format("name='%s'", testFileName));
+    sourceProps.put("fileMetadataProperties", "name,mimeType,size,imageMediaMetadata.width," +
+      "imageMediaMetadata.height,imageMediaMetadata.rotation");
+    sourceProps.put("maxPartitionSize", Integer.toString(testMaxPartitionSize));
+    Map<String, String> sinkProps = getFileSinkMinimalDefaultConfigs();
+
+    DeploymentDetails deploymentDetails =
+      deployApplication(sourceProps, sinkProps, "GoogleDriveSource", "FileSink",
+                        GOOGLE_DRIVE_PLUGIN_NAME, FILE_PLUGIN_NAME, GOOGLE_DRIVE_ARTIFACT, FILE_ARTIFACT,
+                        GOOGLE_DRIVE_PLUGIN_NAME + "-testWithFileSink");
+    startWorkFlow(deploymentDetails.getAppManager(), ProgramRunStatus.COMPLETED);
+
+    // check number of rows in and out
+    checkRowsNumber(deploymentDetails, 4);
+
+    Assert.assertTrue(Files.isDirectory(Paths.get(TMP_FOLDER)));
+
+    List<Path> allDeploysResults = Files.list(Paths.get(TMP_FOLDER)).collect(Collectors.toList());
+    assertEquals(1, allDeploysResults.size());
+
+    Path deployResult = allDeploysResults.get(0);
+    Assert.assertTrue(Files.isDirectory(deployResult));
+    assertEquals(1,
+                 Files.list(deployResult).filter(p -> p.getFileName().toString().equals("_SUCCESS")).count());
+
+    List<Path> destFiles =
+      Files.list(deployResult).filter(p -> p.getFileName().toString().startsWith("part")).collect(Collectors.toList());
+    assertEquals(4, destFiles.size());
+
+    JsonParser jsonParser = new JsonParser();
+
+    Map<Integer, byte[]> partitionedContent = new HashMap<>();
+    for (Path destFile : destFiles) {
+      List<String> fileLines = null;
+      try {
+        fileLines = Files.readAllLines(destFile);
+      } catch (IOException e) {
+        fail(String.format("Exception during reading file '%s': %s", destFile.toString(), e.getMessage()));
+      }
+      String fileContent = String.join(",", fileLines);
+      JsonElement rootElement = jsonParser.parse(fileContent);
+      Assert.assertTrue(rootElement.isJsonObject());
+
+      JsonObject rootObject = rootElement.getAsJsonObject();
+      Set<Map.Entry<String, JsonElement>> entries = rootObject.entrySet();
+
+      int resultOffset = 0;
+      byte[] resultBody = new byte[]{};
+      for (Map.Entry<String, JsonElement> entry : entries) {
+        JsonElement value = entry.getValue();
+        switch (entry.getKey()) {
+          case "name":
+            assertEquals(testFileName, value.getAsString());
+            break;
+          case "mimeType":
+            assertEquals(testFileMime, value.getAsString());
+            break;
+          case "size":
+            assertEquals(contentLength, value.getAsInt());
+            break;
+          case "imageMediaMetadata":
+            Assert.assertTrue(value.isJsonObject());
+            Set<Map.Entry<String, JsonElement>> imageEntries = value.getAsJsonObject().entrySet();
+            imageEntries.forEach(imageEntry -> {
+              JsonElement imageValue = imageEntry.getValue();
+              switch (imageEntry.getKey()) {
+                case "width":
+                  assertEquals(5, imageValue.getAsInt());
+                  break;
+                case "height":
+                  assertEquals(5, imageValue.getAsInt());
+                  break;
+                case "rotation":
+                  assertEquals(0, imageValue.getAsInt());
+                  break;
+                default:
+                  fail(String.format("Invalid key '%s' inside 'imageMediaMetadata' record", imageEntry.getKey()));
+              }
+            });
+            break;
+          case "offset":
+            resultOffset = value.getAsInt();
+            break;
+          case "body":
+            JsonArray bytes = value.getAsJsonArray();
+            resultBody = new byte[bytes.size()];
+            for (int i = 0; i < bytes.size(); i++) {
+              resultBody[i] = bytes.get(i).getAsByte();
+            }
+            break;
+          default:
+            fail(String.format("Invalid key '%s' inside record", entry.getKey()));
+        }
+      }
+      partitionedContent.put(resultOffset, resultBody);
+    }
+    byte[] assembledContent = new byte[contentLength];
+    ByteBuffer buffer = ByteBuffer.wrap(assembledContent);
+    for (Map.Entry<Integer, byte[]> part : partitionedContent.entrySet()) {
+      buffer.position(part.getKey());
+      buffer.put(part.getValue());
+    }
+    assertArrayEquals(testPNGContent, buffer.array());
+  }
+
+  private Map<String, String> getDriveSourceMinimalDefaultConfigs() {
     Map<String, String> sourceProps = new HashMap<>();
     sourceProps.put("referenceName", "ref");
     sourceProps.put("directoryIdentifier", sourceFolderId);
@@ -409,7 +594,21 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
     return sourceProps;
   }
 
-  private Map<String, String> getSinkMinimalDefaultConfigs() {
+  private Map<String, String> getFileSourceMinimalDefaultConfigs() {
+    Set<Schema.Field> schemaFields = new HashSet<>();
+    schemaFields.add(Schema.Field.of("body", Schema.nullableOf(Schema.of(Schema.Type.BYTES))));
+    Schema fileSchema = Schema.recordOf(
+      "blob",
+      schemaFields);
+    Map<String, String> sourceProps = new HashMap<>();
+    sourceProps.put("path", TMP_FOLDER);
+    sourceProps.put("referenceName", "fileref");
+    sourceProps.put("format", "blob");
+    sourceProps.put("schema", fileSchema.toString());
+    return sourceProps;
+  }
+
+  private Map<String, String> getDriveSinkMinimalDefaultConfigs() {
     Map<String, String> sinkProps = new HashMap<>();
     sinkProps.put("referenceName", "refd");
     sinkProps.put("directoryIdentifier", sinkFolderId);
@@ -421,6 +620,20 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
     return sinkProps;
   }
 
+  private Map<String, String> getFileSinkMinimalDefaultConfigs() {
+    Map<String, String> sinkProps = new HashMap<>();
+    sinkProps.put("suffix", "yyyy-MM-dd-HH-mm");
+    sinkProps.put("path", TMP_FOLDER);
+    sinkProps.put("referenceName", "fileref");
+    sinkProps.put("format", "json");
+    return sinkProps;
+  }
+
+  protected void startWorkFlow(ApplicationManager appManager, ProgramRunStatus expectedStatus) throws Exception {
+    WorkflowManager workflowManager = appManager.getWorkflowManager(SmartWorkflow.NAME);
+    workflowManager.startAndWaitForRun(expectedStatus, 5, TimeUnit.MINUTES);
+  }
+
   private void checkRowsNumber(DeploymentDetails deploymentDetails, int expectedCount) throws Exception {
     ApplicationId appId = deploymentDetails.getAppId();
     Map<String, String> tags = ImmutableMap.of(Constants.Metrics.Tag.NAMESPACE, appId.getNamespace(),
@@ -429,13 +642,6 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
                 expectedCount, 10);
     checkMetric(tags, "user." + deploymentDetails.getSink().getName() + ".records.in",
                 expectedCount, 10);
-  }
-
-  @Override
-  protected void innerSetup() {
-    ImmutableList.of(ImmutableList.of(GOOGLE_DRIVE_PLUGIN_NAME, BatchSource.PLUGIN_TYPE, "cdap-data-pipeline"),
-                     ImmutableList.of(GOOGLE_DRIVE_PLUGIN_NAME, BatchSink.PLUGIN_TYPE, "cdap-data-pipeline"))
-      .forEach((pluginInfo) -> checkPluginExists(pluginInfo.get(0), pluginInfo.get(1), pluginInfo.get(2)));
   }
 
   void checkPluginExists(String pluginName, String pluginType, String artifact) {
@@ -461,22 +667,29 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
     }
   }
 
-  @Override
-  protected void innerTearDown() throws Exception {
-  }
-
-  private DeploymentDetails deployApplication(Map<String, String> sourceProperties,
+  private DeploymentDetails deployGoogleDriveApplication(Map<String, String> sourceProperties,
                                               Map<String, String> sinkProperties,
                                               String applicationName) throws Exception {
-    ETLStage source = new ETLStage("GoogleDriveSource",
-                                   new ETLPlugin(GOOGLE_DRIVE_PLUGIN_NAME,
+    return deployApplication(sourceProperties, sinkProperties,
+                             "GoogleDriveSource", "GoogleDriveSink",
+                             GOOGLE_DRIVE_PLUGIN_NAME, GOOGLE_DRIVE_PLUGIN_NAME,
+                             GOOGLE_DRIVE_ARTIFACT, GOOGLE_DRIVE_ARTIFACT, applicationName);
+  }
+
+  private DeploymentDetails deployApplication(Map<String, String> sourceProperties, Map<String, String> sinkProperties,
+                                              String sourceStageName, String sinkStageName,
+                                              String sourcePluginName, String sinkPluginName,
+                                              ArtifactSelectorConfig sourceArtifact, ArtifactSelectorConfig sinkArtifact,
+                                              String applicationName) throws Exception {
+    ETLStage source = new ETLStage(sourceStageName,
+                                   new ETLPlugin(sourcePluginName,
                                                  BatchSource.PLUGIN_TYPE,
                                                  sourceProperties,
-                                                 GOOGLE_DRIVE_ARTIFACT));
-    ETLStage sink = new ETLStage("GoogleDriveSink", new ETLPlugin(GOOGLE_DRIVE_PLUGIN_NAME,
-                                                                  BatchSink.PLUGIN_TYPE,
-                                                                  sinkProperties,
-                                                                  GOOGLE_DRIVE_ARTIFACT));
+                                                 sourceArtifact));
+    ETLStage sink = new ETLStage(sinkStageName, new ETLPlugin(sinkPluginName,
+                                                              BatchSink.PLUGIN_TYPE,
+                                                              sinkProperties,
+                                                              sinkArtifact));
 
     ETLBatchConfig etlConfig = ETLBatchConfig.builder()
       .addStage(source)
@@ -542,6 +755,14 @@ public class GoogleDriveTest extends DataprocUserCredentialsTestBase {
 
     get.executeMediaAndDownloadTo(outputStream);
     return ((ByteArrayOutputStream) outputStream).toString();
+  }
+
+  private void createFileSystemFolder(String path) throws IOException {
+    Files.createDirectory(Paths.get(path));
+  }
+
+  private void createFileSystemTextFile(String path, String content) throws IOException {
+    Files.write(Paths.get(path), content.getBytes());
   }
 
   private class DeploymentDetails {
