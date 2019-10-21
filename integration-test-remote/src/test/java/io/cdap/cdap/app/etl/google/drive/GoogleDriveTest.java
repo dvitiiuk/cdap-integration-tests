@@ -16,19 +16,12 @@
 
 package io.cdap.cdap.app.etl.google.drive;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -108,7 +101,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
   private static final String TEST_TEXT_FILE_CONTENT = "text file content";
   private static final String TEST_DOC_FILE_CONTENT = "Google Document file content";
   private static final String TEST_SHEET_FILE_CONTENT = "a,b,c\r\n,d,e";
-  public static final String TMP_FOLDER = "/tmp/googleDriveTestFolder";
+  public static final String TMP_FOLDER_NAME = "googleDriveTestFolder";
 
   private static Drive service;
   private String sourceFolderId;
@@ -116,6 +109,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
   private String testTextFileId;
   private String testDocFileId;
   private String testSheetFileId;
+  private Path tmpFolder;
 
   @BeforeClass
   public static void setupDrive() throws GeneralSecurityException, IOException {
@@ -150,7 +144,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
                                "application/vnd.google-apps.document", TEXT_PLAIN_MIME, sourceFolderId);
     testSheetFileId = createFile(service, TEST_SHEET_FILE_CONTENT.getBytes(), TEST_SHEET_FILE_NAME,
                                  "application/vnd.google-apps.spreadsheet", TEXT_CSV_MIME, sourceFolderId);
-    createFileSystemFolder(TMP_FOLDER);
+    tmpFolder = createFileSystemFolder(TMP_FOLDER_NAME);
   }
 
   @After
@@ -161,7 +155,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     removeFile(service, sourceFolderId);
     removeFile(service, sinkFolderId);
 
-    Files.walk(Paths.get(TMP_FOLDER))
+    Files.walk(tmpFolder)
       .sorted(Comparator.reverseOrder())
       .map(Path::toFile)
       .forEach(java.io.File::delete);
@@ -182,16 +176,16 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     checkRowsNumber(deploymentDetails, 1);
 
     List<File> destFiles = getFiles(sinkFolderId);
-    assertEquals(1, destFiles.size());
+    Assert.assertEquals(1, destFiles.size());
 
     File textFile = destFiles.get(0);
 
-    assertEquals(UNDEFINED_MIME, textFile.getMimeType());
-    assertNotEquals(TEST_TEXT_FILE_NAME, textFile.getName());
-    assertEquals(GENERATED_NAME_LENGTH, textFile.getName().length());
+    Assert.assertEquals(UNDEFINED_MIME, textFile.getMimeType());
+    Assert.assertNotEquals(TEST_TEXT_FILE_NAME, textFile.getName());
+    Assert.assertEquals(GENERATED_NAME_LENGTH, textFile.getName().length());
 
     String content = getFileContent(textFile.getId());
-    assertEquals(TEST_TEXT_FILE_CONTENT, content);
+    Assert.assertEquals(TEST_TEXT_FILE_CONTENT, content);
   }
 
   @Test
@@ -209,18 +203,18 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     checkRowsNumber(deploymentDetails, 1);
 
     List<File> destFiles = getFiles(sinkFolderId);
-    assertEquals(1, destFiles.size());
+    Assert.assertEquals(1, destFiles.size());
 
     File docFile = destFiles.get(0);
 
-    assertEquals(UNDEFINED_MIME, docFile.getMimeType());
-    assertNotEquals(TEST_TEXT_FILE_NAME, docFile.getName());
-    assertEquals(GENERATED_NAME_LENGTH, docFile.getName().length());
+    Assert.assertEquals(UNDEFINED_MIME, docFile.getMimeType());
+    Assert.assertNotEquals(TEST_TEXT_FILE_NAME, docFile.getName());
+    Assert.assertEquals(GENERATED_NAME_LENGTH, docFile.getName().length());
 
     String content = getFileContent(docFile.getId());
     // check BOM
-    assertEquals('\uFEFF', content.charAt(0));
-    assertEquals(TEST_DOC_FILE_CONTENT, content.replace("\uFEFF", ""));
+    Assert.assertEquals('\uFEFF', content.charAt(0));
+    Assert.assertEquals(TEST_DOC_FILE_CONTENT, content.replace("\uFEFF", ""));
   }
 
   @Test
@@ -238,14 +232,14 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     checkRowsNumber(deploymentDetails, 3);
 
     List<File> destFiles = getFiles(sinkFolderId);
-    assertEquals(3, destFiles.size());
+    Assert.assertEquals(3, destFiles.size());
 
     destFiles.forEach(file -> {
-      assertEquals(UNDEFINED_MIME, file.getMimeType());
-      assertNotEquals(TEST_TEXT_FILE_NAME, file.getName());
-      assertNotEquals(TEST_DOC_FILE_NAME, file.getName());
-      assertNotEquals(TEST_SHEET_FILE_NAME, file.getName());
-      assertEquals(GENERATED_NAME_LENGTH, file.getName().length());
+      Assert.assertEquals(UNDEFINED_MIME, file.getMimeType());
+      Assert.assertNotEquals(TEST_TEXT_FILE_NAME, file.getName());
+      Assert.assertNotEquals(TEST_DOC_FILE_NAME, file.getName());
+      Assert.assertNotEquals(TEST_SHEET_FILE_NAME, file.getName());
+      Assert.assertEquals(GENERATED_NAME_LENGTH, file.getName().length());
     });
   }
 
@@ -266,31 +260,31 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     checkRowsNumber(deploymentDetails, 3);
 
     List<File> destFiles = getFiles(sinkFolderId);
-    assertEquals(3, destFiles.size());
+    Assert.assertEquals(3, destFiles.size());
 
     destFiles.forEach(file -> {
-      assertEquals(UNDEFINED_MIME, file.getMimeType());
+      Assert.assertEquals(UNDEFINED_MIME, file.getMimeType());
       Assert.assertNotNull(file.getName());
       try {
         String fileName = file.getName();
         String content = getFileContent(file.getId());
         switch (fileName) {
           case TEST_TEXT_FILE_NAME:
-            assertEquals(TEST_TEXT_FILE_CONTENT, content);
+            Assert.assertEquals(TEST_TEXT_FILE_CONTENT, content);
             break;
           case TEST_DOC_FILE_NAME:
             // check BOM
-            assertEquals('\uFEFF', content.charAt(0));
-            assertEquals(TEST_DOC_FILE_CONTENT, content.replace("\uFEFF", ""));
+            Assert.assertEquals('\uFEFF', content.charAt(0));
+            Assert.assertEquals(TEST_DOC_FILE_CONTENT, content.replace("\uFEFF", ""));
             break;
           case TEST_SHEET_FILE_NAME:
-            assertEquals(TEST_SHEET_FILE_CONTENT, content);
+            Assert.assertEquals(TEST_SHEET_FILE_CONTENT, content);
             break;
           default:
-            fail(String.format("Invalid file name after pipeline completion: '%s', content: '%s'", fileName, content));
+            Assert.fail(String.format("Invalid file name after pipeline completion: '%s', content: '%s'", fileName, content));
         }
       } catch (IOException e) {
-        fail(String.format("Exception during test results check: [%s]", e.getMessage()));
+        Assert.fail(String.format("Exception during test results check: [%s]", e.getMessage()));
       }
     });
   }
@@ -313,7 +307,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     checkRowsNumber(deploymentDetails, 3);
 
     List<File> destFiles = getFiles(sinkFolderId);
-    assertEquals(3, destFiles.size());
+    Assert.assertEquals(3, destFiles.size());
 
     destFiles.forEach(file -> {
       Assert.assertNotNull(file.getName());
@@ -325,25 +319,25 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
         String content = getFileContent(file.getId());
         switch (fileName) {
           case TEST_TEXT_FILE_NAME:
-            assertEquals(TEST_TEXT_FILE_CONTENT, content);
-            assertEquals(TEXT_PLAIN_MIME, mimeType);
+            Assert.assertEquals(TEST_TEXT_FILE_CONTENT, content);
+            Assert.assertEquals(TEXT_PLAIN_MIME, mimeType);
             break;
           case TEST_DOC_FILE_NAME:
             // check BOM
-            assertEquals('\uFEFF', content.charAt(0));
-            assertEquals(TEST_DOC_FILE_CONTENT, content.replace("\uFEFF", ""));
-            assertEquals(TEXT_PLAIN_MIME, mimeType);
+            Assert.assertEquals('\uFEFF', content.charAt(0));
+            Assert.assertEquals(TEST_DOC_FILE_CONTENT, content.replace("\uFEFF", ""));
+            Assert.assertEquals(TEXT_PLAIN_MIME, mimeType);
             break;
           case TEST_SHEET_FILE_NAME:
-            assertEquals(TEST_SHEET_FILE_CONTENT, content);
-            assertEquals(TEXT_CSV_MIME, mimeType);
+            Assert.assertEquals(TEST_SHEET_FILE_CONTENT, content);
+            Assert.assertEquals(TEXT_CSV_MIME, mimeType);
             break;
           default:
-            fail(String.format("Invalid file name after pipeline completion: '%s', content: '%s', mime type: '%s'",
+            Assert.fail(String.format("Invalid file name after pipeline completion: '%s', content: '%s', mime type: '%s'",
                                fileName, content, mimeType));
         }
       } catch (IOException e) {
-        fail(String.format("Exception during test results check: [%s], file name '%s', mimeType '%s'",
+        Assert.fail(String.format("Exception during test results check: [%s], file name '%s', mimeType '%s'",
                            e.getMessage(),
                            fileName == null ? "unknown" : fileName,
                            mimeType == null ? "unknown" : mimeType));
@@ -372,7 +366,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     checkRowsNumber(deploymentDetails, 4);
 
     List<File> destFiles = getFiles(sinkFolderId);
-    assertEquals(4, destFiles.size());
+    Assert.assertEquals(4, destFiles.size());
 
     // flags to check partitioning work
     boolean firstTextPart = false;
@@ -388,8 +382,8 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
         String content = getFileContent(file.getId());
         switch (fileName) {
           case TEST_TEXT_FILE_NAME:
-            assertNotEquals(TEST_TEXT_FILE_CONTENT, content);
-            assertEquals(TEXT_PLAIN_MIME, mimeType);
+            Assert.assertNotEquals(TEST_TEXT_FILE_CONTENT, content);
+            Assert.assertEquals(TEXT_PLAIN_MIME, mimeType);
             parts.add(content);
             if (content.equals(TEST_TEXT_FILE_CONTENT.substring(0, testMaxPartitionSize))) {
               firstTextPart = true;
@@ -400,30 +394,30 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
             break;
           case TEST_DOC_FILE_NAME:
             // check BOM
-            assertEquals('\uFEFF', content.charAt(0));
-            assertEquals(TEST_DOC_FILE_CONTENT, content.replace("\uFEFF", ""));
-            assertEquals(TEXT_PLAIN_MIME, mimeType);
+            Assert.assertEquals('\uFEFF', content.charAt(0));
+            Assert.assertEquals(TEST_DOC_FILE_CONTENT, content.replace("\uFEFF", ""));
+            Assert.assertEquals(TEXT_PLAIN_MIME, mimeType);
             break;
           case TEST_SHEET_FILE_NAME:
-            assertEquals(TEST_SHEET_FILE_CONTENT, content);
-            assertEquals(TEXT_CSV_MIME, mimeType);
+            Assert.assertEquals(TEST_SHEET_FILE_CONTENT, content);
+            Assert.assertEquals(TEXT_CSV_MIME, mimeType);
             break;
           default:
-            fail(String.format("Invalid file name after pipeline completion: '%s', content: '%s', mime type: '%s'",
+            Assert.fail(String.format("Invalid file name after pipeline completion: '%s', content: '%s', mime type: '%s'",
                                fileName, content, mimeType));
         }
       } catch (IOException e) {
-        fail(String.format("Exception during test results check: [%s]", e.getMessage()));
+        Assert.fail(String.format("Exception during test results check: [%s]", e.getMessage()));
       }
     }
-    assertTrue(String.format("Text file was separated incorrectly: %s", parts.toString()), firstTextPart);
-    assertTrue(String.format("Text file was separated incorrectly: %s", parts.toString()), secondTextPart);
+    Assert.assertTrue(String.format("Text file was separated incorrectly: %s", parts.toString()), firstTextPart);
+    Assert.assertTrue(String.format("Text file was separated incorrectly: %s", parts.toString()), secondTextPart);
   }
 
   @Test
   public void testWithFileSource() throws Exception {
     // create test file
-    createFileSystemTextFile(TMP_FOLDER + "/" + TEST_TEXT_FILE_NAME, TEST_TEXT_FILE_CONTENT);
+    createFileSystemTextFile(tmpFolder, TEST_TEXT_FILE_NAME, TEST_TEXT_FILE_CONTENT);
 
     Map<String, String> sourceProps = getFileSourceMinimalDefaultConfigs();
     Map<String, String> sinkProps = getDriveSinkMinimalDefaultConfigs();
@@ -438,16 +432,16 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     checkRowsNumber(deploymentDetails, 1);
 
     List<File> destFiles = getFiles(sinkFolderId);
-    assertEquals(1, destFiles.size());
+    Assert.assertEquals(1, destFiles.size());
 
     File textFile = destFiles.get(0);
 
-    assertEquals(UNDEFINED_MIME, textFile.getMimeType());
-    assertNotEquals(TEST_TEXT_FILE_NAME, textFile.getName());
-    assertEquals(GENERATED_NAME_LENGTH, textFile.getName().length());
+    Assert.assertEquals(UNDEFINED_MIME, textFile.getMimeType());
+    Assert.assertNotEquals(TEST_TEXT_FILE_NAME, textFile.getName());
+    Assert.assertEquals(GENERATED_NAME_LENGTH, textFile.getName().length());
 
     String content = getFileContent(textFile.getId());
-    assertEquals(TEST_TEXT_FILE_CONTENT, content);
+    Assert.assertEquals(TEST_TEXT_FILE_CONTENT, content);
   }
 
   @Test
@@ -485,19 +479,19 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     // check number of rows in and out
     checkRowsNumber(deploymentDetails, 4);
 
-    Assert.assertTrue(Files.isDirectory(Paths.get(TMP_FOLDER)));
+    Assert.assertTrue(Files.isDirectory(tmpFolder));
 
-    List<Path> allDeploysResults = Files.list(Paths.get(TMP_FOLDER)).collect(Collectors.toList());
-    assertEquals(1, allDeploysResults.size());
+    List<Path> allDeploysResults = Files.list(tmpFolder).collect(Collectors.toList());
+    Assert.assertEquals(1, allDeploysResults.size());
 
     Path deployResult = allDeploysResults.get(0);
     Assert.assertTrue(Files.isDirectory(deployResult));
-    assertEquals(1,
+    Assert.assertEquals(1,
                  Files.list(deployResult).filter(p -> p.getFileName().toString().equals("_SUCCESS")).count());
 
     List<Path> destFiles =
       Files.list(deployResult).filter(p -> p.getFileName().toString().startsWith("part")).collect(Collectors.toList());
-    assertEquals(4, destFiles.size());
+    Assert.assertEquals(4, destFiles.size());
 
     JsonParser jsonParser = new JsonParser();
 
@@ -507,62 +501,34 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
       try {
         fileLines = Files.readAllLines(destFile);
       } catch (IOException e) {
-        fail(String.format("Exception during reading file '%s': %s", destFile.toString(), e.getMessage()));
+        Assert.fail(String.format("Exception during reading file '%s': %s", destFile.toString(), e.getMessage()));
       }
       String fileContent = String.join(",", fileLines);
       JsonElement rootElement = jsonParser.parse(fileContent);
       Assert.assertTrue(rootElement.isJsonObject());
 
       JsonObject rootObject = rootElement.getAsJsonObject();
-      Set<Map.Entry<String, JsonElement>> entries = rootObject.entrySet();
 
-      int resultOffset = 0;
-      byte[] resultBody = new byte[]{};
-      for (Map.Entry<String, JsonElement> entry : entries) {
-        JsonElement value = entry.getValue();
-        switch (entry.getKey()) {
-          case "name":
-            assertEquals(testFileName, value.getAsString());
-            break;
-          case "mimeType":
-            assertEquals(testFileMime, value.getAsString());
-            break;
-          case "size":
-            assertEquals(contentLength, value.getAsInt());
-            break;
-          case "imageMediaMetadata":
-            Assert.assertTrue(value.isJsonObject());
-            Set<Map.Entry<String, JsonElement>> imageEntries = value.getAsJsonObject().entrySet();
-            imageEntries.forEach(imageEntry -> {
-              JsonElement imageValue = imageEntry.getValue();
-              switch (imageEntry.getKey()) {
-                case "width":
-                  assertEquals(5, imageValue.getAsInt());
-                  break;
-                case "height":
-                  assertEquals(5, imageValue.getAsInt());
-                  break;
-                case "rotation":
-                  assertEquals(0, imageValue.getAsInt());
-                  break;
-                default:
-                  fail(String.format("Invalid key '%s' inside 'imageMediaMetadata' record", imageEntry.getKey()));
-              }
-            });
-            break;
-          case "offset":
-            resultOffset = value.getAsInt();
-            break;
-          case "body":
-            JsonArray bytes = value.getAsJsonArray();
-            resultBody = new byte[bytes.size()];
-            for (int i = 0; i < bytes.size(); i++) {
-              resultBody[i] = bytes.get(i).getAsByte();
-            }
-            break;
-          default:
-            fail(String.format("Invalid key '%s' inside record", entry.getKey()));
-        }
+      // Entries: name, mimeType, size, imageMediaMetadata, offset, body
+      Assert.assertEquals(6, rootObject.entrySet().size());
+      Assert.assertEquals(testFileName, rootObject.get("name").getAsString());
+      Assert.assertEquals(testFileMime, rootObject.get("mimeType").getAsString());
+      Assert.assertEquals(contentLength, rootObject.get("size").getAsInt());
+
+      JsonObject imageMediaMetadataObject = rootObject.get("imageMediaMetadata").getAsJsonObject();
+
+      // Image metadata entries: width, height, rotation
+      Assert.assertEquals(3, imageMediaMetadataObject.entrySet().size());
+      Assert.assertEquals(5, imageMediaMetadataObject.get("width").getAsInt());
+      Assert.assertEquals(5, imageMediaMetadataObject.get("height").getAsInt());
+      Assert.assertEquals(0, imageMediaMetadataObject.get("rotation").getAsInt());
+
+      // collect bodies for next check
+      int resultOffset = rootObject.get("offset").getAsInt();
+      JsonArray bytes = rootObject.get("body").getAsJsonArray();
+      byte[]  resultBody = new byte[bytes.size()];
+      for (int i = 0; i < bytes.size(); i++) {
+        resultBody[i] = bytes.get(i).getAsByte();
       }
       partitionedContent.put(resultOffset, resultBody);
     }
@@ -572,7 +538,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
       buffer.position(part.getKey());
       buffer.put(part.getValue());
     }
-    assertArrayEquals(testPNGContent, buffer.array());
+    Assert.assertArrayEquals(testPNGContent, buffer.array());
   }
 
   private Map<String, String> getDriveSourceMinimalDefaultConfigs() {
@@ -601,7 +567,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
       "blob",
       schemaFields);
     Map<String, String> sourceProps = new HashMap<>();
-    sourceProps.put("path", TMP_FOLDER);
+    sourceProps.put("path", tmpFolder.toString());
     sourceProps.put("referenceName", "fileref");
     sourceProps.put("format", "blob");
     sourceProps.put("schema", fileSchema.toString());
@@ -623,7 +589,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
   private Map<String, String> getFileSinkMinimalDefaultConfigs() {
     Map<String, String> sinkProps = new HashMap<>();
     sinkProps.put("suffix", "yyyy-MM-dd-HH-mm");
-    sinkProps.put("path", TMP_FOLDER);
+    sinkProps.put("path", tmpFolder.toString());
     sinkProps.put("referenceName", "fileref");
     sinkProps.put("format", "json");
     return sinkProps;
@@ -757,12 +723,13 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     return ((ByteArrayOutputStream) outputStream).toString();
   }
 
-  private void createFileSystemFolder(String path) throws IOException {
-    Files.createDirectory(Paths.get(path));
+  private Path createFileSystemFolder(String path) throws IOException {
+    return Files.createTempDirectory(path);
   }
 
-  private void createFileSystemTextFile(String path, String content) throws IOException {
-    Files.write(Paths.get(path), content.getBytes());
+  private void createFileSystemTextFile(Path dirPath, String name, String content) throws IOException {
+    Path createdFile = Files.createTempFile(dirPath, name, null);
+    Files.write(createdFile, content.getBytes());
   }
 
   private class DeploymentDetails {
