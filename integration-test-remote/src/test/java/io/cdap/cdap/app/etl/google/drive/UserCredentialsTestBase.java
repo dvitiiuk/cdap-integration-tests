@@ -16,23 +16,20 @@
 
 package io.cdap.cdap.app.etl.google.drive;
 
-import java.io.IOException;
-
 import org.junit.BeforeClass;
 
-import io.cdap.cdap.app.etl.gcp.DataprocETLTestBase;
+import io.cdap.cdap.app.etl.ETLTestBase;
 
 /**
- * An abstract class used for running integration tests with Google OAuth2 user credentials.
+ * An abstract class used for running integration tests with Google OAuth2 user account credentials.
  */
-public abstract class DataprocUserCredentialsTestBase extends DataprocETLTestBase {
+public abstract class UserCredentialsTestBase extends ETLTestBase {
   private static String clientId;
   private static String clientSecret;
   private static String refreshToken;
 
   @BeforeClass
-  public static void testDataprocClassSetup() throws IOException {
-    DataprocETLTestBase.testDataprocClassSetup();
+  public static void userCredentialsSetup() {
     clientId = System.getProperty("google.application.clientId");
     clientSecret = System.getProperty("google.application.clientSecret");
     refreshToken = System.getProperty("google.application.refreshToken");
