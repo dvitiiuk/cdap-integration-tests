@@ -18,40 +18,22 @@ package io.cdap.cdap.app.etl.google.drive;
 
 import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
-import com.google.api.client.http.ByteArrayContent;
 import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.services.drive.Drive;
 import com.google.api.services.drive.model.File;
-import com.google.api.services.drive.model.FileList;
-import com.google.common.base.Preconditions;
-import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import io.cdap.cdap.api.artifact.ArtifactScope;
 import io.cdap.cdap.api.data.schema.Schema;
-import io.cdap.cdap.common.ArtifactNotFoundException;
-import io.cdap.cdap.common.conf.Constants;
-import io.cdap.cdap.common.utils.Tasks;
-import io.cdap.cdap.datapipeline.SmartWorkflow;
+import io.cdap.cdap.app.etl.google.GoogleBaseTest;
 import io.cdap.cdap.etl.api.batch.BatchSink;
 import io.cdap.cdap.etl.api.batch.BatchSource;
 import io.cdap.cdap.etl.proto.ArtifactSelectorConfig;
-import io.cdap.cdap.etl.proto.v2.ETLBatchConfig;
-import io.cdap.cdap.etl.proto.v2.ETLPlugin;
-import io.cdap.cdap.etl.proto.v2.ETLStage;
 import io.cdap.cdap.proto.ProgramRunStatus;
-import io.cdap.cdap.proto.artifact.AppRequest;
-import io.cdap.cdap.proto.artifact.PluginSummary;
-import io.cdap.cdap.proto.id.ApplicationId;
-import io.cdap.cdap.proto.id.ArtifactId;
-import io.cdap.cdap.test.ApplicationManager;
-import io.cdap.cdap.test.WorkflowManager;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.After;
 import org.junit.Assert;
@@ -67,20 +49,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
  * Tests reading to and writing from Google Drive within a sandbox cluster.
  */
-public class GoogleDriveTest extends UserCredentialsTestBase {
+public class GoogleDriveTest extends GoogleBaseTest {
   protected static final ArtifactSelectorConfig GOOGLE_DRIVE_ARTIFACT =
     new ArtifactSelectorConfig("SYSTEM", "google-drive-plugins", "[0.0.0, 100.0.0)");
   protected static final ArtifactSelectorConfig FILE_ARTIFACT =
@@ -173,7 +153,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     // check number of rows in and out
     checkRowsNumber(deploymentDetails, 1);
 
-    List<File> destFiles = getFiles(sinkFolderId);
+    List<File> destFiles = getFiles(service, sinkFolderId);
     Assert.assertEquals(1, destFiles.size());
 
     File textFile = destFiles.get(0);
@@ -200,7 +180,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     // check number of rows in and out
     checkRowsNumber(deploymentDetails, 1);
 
-    List<File> destFiles = getFiles(sinkFolderId);
+    List<File> destFiles = getFiles(service, sinkFolderId);
     Assert.assertEquals(1, destFiles.size());
 
     File docFile = destFiles.get(0);
@@ -229,7 +209,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     // check number of rows in and out
     checkRowsNumber(deploymentDetails, 3);
 
-    List<File> destFiles = getFiles(sinkFolderId);
+    List<File> destFiles = getFiles(service, sinkFolderId);
     Assert.assertEquals(3, destFiles.size());
 
     destFiles.forEach(file -> {
@@ -257,7 +237,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     // check number of rows in and out
     checkRowsNumber(deploymentDetails, 3);
 
-    List<File> destFiles = getFiles(sinkFolderId);
+    List<File> destFiles = getFiles(service, sinkFolderId);
     Assert.assertEquals(3, destFiles.size());
 
     destFiles.forEach(file -> {
@@ -304,7 +284,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     // check number of rows in and out
     checkRowsNumber(deploymentDetails, 3);
 
-    List<File> destFiles = getFiles(sinkFolderId);
+    List<File> destFiles = getFiles(service, sinkFolderId);
     Assert.assertEquals(3, destFiles.size());
 
     destFiles.forEach(file -> {
@@ -363,7 +343,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     // check number of rows in and out
     checkRowsNumber(deploymentDetails, 4);
 
-    List<File> destFiles = getFiles(sinkFolderId);
+    List<File> destFiles = getFiles(service, sinkFolderId);
     Assert.assertEquals(4, destFiles.size());
 
     // flags to check partitioning work
@@ -429,7 +409,7 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     // check number of rows in and out
     checkRowsNumber(deploymentDetails, 1);
 
-    List<File> destFiles = getFiles(sinkFolderId);
+    List<File> destFiles = getFiles(service, sinkFolderId);
     Assert.assertEquals(1, destFiles.size());
 
     File textFile = destFiles.get(0);
@@ -599,44 +579,6 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
     return sinkProps;
   }
 
-  protected void startWorkFlow(ApplicationManager appManager, ProgramRunStatus expectedStatus) throws Exception {
-    WorkflowManager workflowManager = appManager.getWorkflowManager(SmartWorkflow.NAME);
-    workflowManager.startAndWaitForRun(expectedStatus, 5, TimeUnit.MINUTES);
-  }
-
-  private void checkRowsNumber(DeploymentDetails deploymentDetails, int expectedCount) throws Exception {
-    ApplicationId appId = deploymentDetails.getAppId();
-    Map<String, String> tags = ImmutableMap.of(Constants.Metrics.Tag.NAMESPACE, appId.getNamespace(),
-                                               Constants.Metrics.Tag.APP, appId.getEntityName());
-    checkMetric(tags, "user." + deploymentDetails.getSource().getName() + ".records.out",
-                expectedCount, 10);
-    checkMetric(tags, "user." + deploymentDetails.getSink().getName() + ".records.in",
-                expectedCount, 10);
-  }
-
-  void checkPluginExists(String pluginName, String pluginType, String artifact) {
-    Preconditions.checkNotNull(pluginName);
-    Preconditions.checkNotNull(pluginType);
-    Preconditions.checkNotNull(artifact);
-
-    try {
-      Tasks.waitFor(true, () -> {
-        try {
-          final ArtifactId artifactId = TEST_NAMESPACE.artifact(artifact, version);
-          List<PluginSummary> plugins =
-            artifactClient.getPluginSummaries(artifactId, pluginType, ArtifactScope.SYSTEM);
-          return plugins.stream().anyMatch(pluginSummary -> pluginName.equals(pluginSummary.getName()));
-        } catch (ArtifactNotFoundException e) {
-          // happens if the relevant artifact(s) were not added yet
-          return false;
-        }
-      }, 5, TimeUnit.MINUTES, 3, TimeUnit.SECONDS);
-    } catch (Exception e) {
-      Throwables.throwIfUnchecked(e);
-      throw new RuntimeException(e);
-    }
-  }
-
   private DeploymentDetails deployGoogleDriveApplication(Map<String, String> sourceProperties,
                                               Map<String, String> sinkProperties,
                                               String applicationName) throws Exception {
@@ -646,124 +588,11 @@ public class GoogleDriveTest extends UserCredentialsTestBase {
                              GOOGLE_DRIVE_ARTIFACT, GOOGLE_DRIVE_ARTIFACT, applicationName);
   }
 
-  private DeploymentDetails deployApplication(Map<String, String> sourceProperties, Map<String, String> sinkProperties,
-                                              String sourceStageName, String sinkStageName,
-                                              String sourcePluginName, String sinkPluginName,
-                                              ArtifactSelectorConfig sourceArtifact, ArtifactSelectorConfig sinkArtifact,
-                                              String applicationName) throws Exception {
-    ETLStage source = new ETLStage(sourceStageName,
-                                   new ETLPlugin(sourcePluginName,
-                                                 BatchSource.PLUGIN_TYPE,
-                                                 sourceProperties,
-                                                 sourceArtifact));
-    ETLStage sink = new ETLStage(sinkStageName, new ETLPlugin(sinkPluginName,
-                                                              BatchSink.PLUGIN_TYPE,
-                                                              sinkProperties,
-                                                              sinkArtifact));
-
-    ETLBatchConfig etlConfig = ETLBatchConfig.builder()
-      .addStage(source)
-      .addStage(sink)
-      .addConnection(source.getName(), sink.getName())
-      .build();
-
-    AppRequest<ETLBatchConfig> appRequest = getBatchAppRequestV2(etlConfig);
-    ApplicationId appId = TEST_NAMESPACE.app(applicationName);
-    ApplicationManager applicationManager = deployApplication(appId, appRequest);
-    return new DeploymentDetails(source, sink, appId, applicationManager);
-  }
-
-  private static String createFile(Drive service, byte[] content, String name, String mime, String subMime,
-                                   String folderId) throws IOException {
-    File fileToWrite = new File();
-    fileToWrite.setName(name);
-    fileToWrite.setParents(Collections.singletonList(folderId));
-    fileToWrite.setMimeType(mime);
-    ByteArrayContent fileContent = new ByteArrayContent(subMime, content);
-
-    File file = service.files().create(fileToWrite, fileContent)
-      .setFields("id, parents, mimeType")
-      .execute();
-    return file.getId();
-  }
-
-  private static String createFolder(Drive service, String folderName) throws IOException {
-    File fileMetadata = new File();
-    fileMetadata.setName(folderName);
-    fileMetadata.setMimeType("application/vnd.google-apps.folder");
-
-    File createdFolder = service.files().create(fileMetadata).setFields("id").execute();
-    return createdFolder.getId();
-  }
-
-  private static void removeFile(Drive service, String fileId) throws IOException {
-    service.files().delete(fileId).execute();
-  }
-
-  private List<File> getFiles(String parentFolderId) {
-    try {
-      List<File> files = new ArrayList<>();
-      String nextToken = "";
-      Drive.Files.List request = service.files().list()
-        .setQ(String.format("'%s' in parents", parentFolderId))
-        .setFields("nextPageToken, files(id, name, size, mimeType)");
-      while (nextToken != null) {
-        FileList result = request.execute();
-        files.addAll(result.getFiles());
-        nextToken = result.getNextPageToken();
-        request.setPageToken(nextToken);
-      }
-      return files;
-    } catch (IOException e) {
-      throw new RuntimeException("Issue during retrieving summary for files.", e);
-    }
-  }
-
   private String getFileContent(String fileId) throws IOException {
     OutputStream outputStream = new ByteArrayOutputStream();
     Drive.Files.Get get = service.files().get(fileId);
 
     get.executeMediaAndDownloadTo(outputStream);
     return ((ByteArrayOutputStream) outputStream).toString();
-  }
-
-  private Path createFileSystemFolder(String path) throws IOException {
-    return Files.createTempDirectory(path);
-  }
-
-  private void createFileSystemTextFile(Path dirPath, String name, String content) throws IOException {
-    Path createdFile = Files.createTempFile(dirPath, name, null);
-    Files.write(createdFile, content.getBytes());
-  }
-
-  private class DeploymentDetails {
-
-    private final ApplicationId appId;
-    private final ETLStage source;
-    private final ETLStage sink;
-    private final ApplicationManager appManager;
-
-    DeploymentDetails(ETLStage source, ETLStage sink, ApplicationId appId, ApplicationManager appManager) {
-      this.appId = appId;
-      this.source = source;
-      this.sink = sink;
-      this.appManager = appManager;
-    }
-
-    public ApplicationId getAppId() {
-      return appId;
-    }
-
-    public ETLStage getSource() {
-      return source;
-    }
-
-    public ETLStage getSink() {
-      return sink;
-    }
-
-    public ApplicationManager getAppManager() {
-      return appManager;
-    }
   }
 }
